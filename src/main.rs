@@ -5,10 +5,19 @@ use chrono::Local;
 use sysinfo::System;
 use chrono::Timelike;
 use sysinfo::Cpu;
-//use reqwest::Client;
+use std::net::TcpStream;
+use std::fs;
+use std::io::{self, BufRead};
+use std::path::Path;
 
 const BATTERY_STATE : [&str; 5] = [" ", " ", " ", " ", " "];
 const CPU_STATE : [&str; 5] = [" ", " ", " ", " ", " "];
+
+//enum Connection {
+//	Wired,
+//	Wifi,
+//	None,
+//}
 
 fn main() {
 	let manager = battery::Manager::new().expect("could not create battery manager");
@@ -28,7 +37,9 @@ fn main() {
 		sys.refresh_memory();
 		let mem_str = mem_display(sys.used_memory());
 		
-		display(format!("| {} | {} | {} | {} ", mem_str, cpu_str, battery_str, time_str));
+		let internet_str = internet_display();
+		
+		display(format!("| {} | {} | {} | {} | {} ", internet_str, mem_str, cpu_str, battery_str, time_str));
 		
 		
 		let mut event = false;
@@ -120,40 +131,70 @@ fn cpu_display(cpus : &[Cpu]) -> String {
 fn mem_display(mem_usage: u64) -> String {
 	let used_memory_gb = mem_usage as f64 / 1024.0 / 1024.0 / 1024.0;
 	
-	return format!(" {:.1}  ", used_memory_gb);
+	return format!(" {:.1} ", used_memory_gb);
 }
 
+fn is_connected_to_internet() -> bool {
+    match TcpStream::connect_timeout(&"8.8.8.8:53".parse().unwrap(), Duration::from_secs(2)) {
+        Ok(_) => true,
+        Err(_) => false,
+    }
+}
 
-//fn measure_bandwidth(url: &str, duration_secs: u64) -> reqwest::Result<f64> {
-//    let client = Client::new();
-//    let mut response = client.get(url).send().await?;
-//    
-//    let start = Instant::now();
-//    let mut total_bytes = 0;
-//    let mut buffer = vec![0; 64 * 1024]; // 64 KB buffer
-//
-//    while start.elapsed().as_secs() < duration_secs {
-//        match response.copy_to(&mut buffer).await {
-//            Ok(n) => total_bytes += n,
-//            Err(e) => return Err(e.into()),
-//        }
-//    }
-//
-//    let elapsed = start.elapsed().as_secs_f64();
-//    let bandwidth = total_bytes as f64 / elapsed; // Bytes per second
-//    println!("Downloaded {:.2} Mb/s measured in {:.2} seconds", bandwidth / (1024.0 * 1024.0), elapsed);
-//
-//    Ok(bandwidth / (1024.0 * 1024.0))
-//}
-//
-//fn internet_display() -> String {
-//	match measure_bandwidth("https://example.com", 5).await {
-//		Ok(bandwidth) => {
-//			return format!("{} Mb/s", bandwidth)
-//		}
-//        Err(e) => {
-//			eprintln!("Error measuring bandwidth: {}", e);
-//			return " ".to_string()
-//		}
-//    }
-//}
+// Check if connected via Ethernet
+fn is_ethernet() -> bool {
+    let output = Command::new("nmcli")
+        .arg("device")
+        .arg("status")
+        .output()
+        .expect("Failed to execute command");
+
+    let status = String::from_utf8_lossy(&output.stdout);
+    status.contains("ethernet")
+}
+
+// Get Wi-Fi signal strength
+fn get_wifi_strength() -> Option<f32> {
+    let file_path = "/proc/net/wireless";
+
+    // Check if the file exists
+    if !Path::new(file_path).exists() {
+        return None;
+    }
+
+    // Read the file line by line
+    let file = fs::File::open(file_path).expect("Failed to open file");
+    let reader = io::BufReader::new(file);
+    
+    // Parse the file content
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.expect("Failed to read line");
+        if index == 2 { // The third line in the file
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() > 2 {
+                if let Ok(signal_dbm) = fields[2].parse::<f32>() {
+                    // Convert dBm to percentage using the same formula as awk
+                    let signal_strength_percentage = (signal_dbm * 10.0 / 7.0).clamp(0.0, 100.0);
+                    return Some(signal_strength_percentage);
+                }
+            }
+        }
+    }
+
+    None
+} 
+
+fn internet_display() -> String {
+	if is_connected_to_internet() {
+        if is_ethernet() {
+            return " ".to_string();
+        } else {
+            match get_wifi_strength() {
+                Some(strength) => return format!("  {:.0}%", strength),
+                None => return " ? ".to_string(),
+            }
+        }
+    } else {
+        return " ".to_string();
+    }
+}
