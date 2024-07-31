@@ -1,6 +1,5 @@
 use std::process::Command;
-use std::thread::sleep;
-use std::time::Duration;
+use tokio::time::{sleep, Duration};
 use chrono::Local;
 use sysinfo::System;
 use chrono::Timelike;
@@ -9,6 +8,9 @@ use std::fs;
 use std::io::{self, BufRead};
 use std::path::Path;
 use sysinfo::Networks;
+use std::sync::Arc;
+use battery::Manager;
+use tokio::sync::{Notify};
 
 const BATTERY_STATE : [&str; 5] = ["", "", "", "", ""];
 const CPU_STATE : [&str; 5] = ["", "", "", "", ""];
@@ -20,17 +22,49 @@ enum Connection {
 	None,
 }
 
-fn main() {
-	let manager = battery::Manager::new().expect("could not create battery manager");
+#[tokio::main]
+async fn main() {
+	let manager = Manager::new().expect("could not create battery manager");
 	let mut sys = System::new();
+	
 	let mut networks = Networks::new();
 	let mut battery = manager.batteries().expect("could not fetch battery").next().expect("there should be a battery").expect("the battery should be okay");
+	
+	let mut networks_2 = Networks::new();
+    let mut battery_2 = manager.batteries().expect("could not fetch battery").next().expect("there should be a battery").expect("the battery should be okay");
+
+
+	let notify = Arc::new(Notify::new());
+	let notify_cloned: Arc<Notify> = Arc::clone(&notify);
+
+	tokio::spawn(async move {
 		
+		loop {
+			sleep(Duration::from_secs(3)).await;
+			
+			let battery_charging = battery_2.time_to_empty().is_none();
+			battery_2.refresh().expect("could not refresh battery");
+			
+			if battery_2.time_to_empty().is_none() != battery_charging && battery_2.state_of_charge().value != 1.0 {
+				notify_cloned.notify_one();
+				println!("battery notif");
+				continue
+			}
+
+			let connection_type = get_connection(&networks_2);
+
+			networks_2.refresh_list();
+			if connection_type != get_connection(&networks_2) {
+				notify_cloned.notify_one();
+				println!("network notif");
+			}
+		}
+	});
+
 	loop {
 		let time_str = time_display();
-
+		
 		battery.refresh().expect("could not refresh battery");
-		let battery_charging = battery.time_to_empty().is_none();
 		let battery_str = battery_display(&battery);
 		
 		sys.refresh_cpu();
@@ -40,23 +74,17 @@ fn main() {
 		let mem_str = mem_display(sys.used_memory());
 		
 		networks.refresh_list();
-		let (internet_str, connection_type) = internet_display(&networks);
+		let internet_str = internet_display(&networks);
 		
 		display(format!("| {} | {} | {} | {} | {} ", internet_str, mem_str, cpu_str, battery_str, time_str));
-		
-		let mut event = false;
-		sleep(Duration::from_secs(1));
-		
-		while Local::now().second() != 0 && !event {
-			sleep(Duration::from_secs(1));
-			
-			battery.refresh().expect("could not refresh battery");
-			if battery.time_to_empty().is_none() != battery_charging && battery.state_of_charge().value != 1.0 {
-				event = true;
+
+		let sleep_or_notify = sleep(Duration::from_secs((60 - Local::now().second()).into()));
+		tokio::select! {
+			_ = sleep_or_notify => {
+				println!("60 seconds elapsed");
 			}
-			networks.refresh_list();
-			if connection_type != get_connection(&networks) {
-				event = true;
+			_ = notify.notified() => {
+				println!("waking up early");
 			}
 		}
 	}
@@ -154,15 +182,15 @@ fn get_wifi_strength() -> Option<f32> {
 	None
 } 
 
-fn internet_display(networks: &Networks) -> (String, Connection) {
+fn internet_display(networks: &Networks) -> String {
 	let connection_type = get_connection(networks);
 	
 	match connection_type {
-		Connection::Wired => (" ".to_string(), Connection::Wired),
-		Connection::None =>  (" ".to_string(), Connection::None),
+		Connection::Wired => " ".to_string(),
+		Connection::None =>  " ".to_string(),
 		Connection::Wifi => {
 			let strength = get_wifi_strength().unwrap_or(0.0);
-			(format!("  {:.0}%", strength), Connection::Wifi)
+			format!("  {:.0}%", strength)
 		}
 	}
 }
