@@ -91,7 +91,7 @@ fn battery_display(battery: &battery::Battery) -> String {
 	
 	let state = BATTERY_STATE[(battery.state_of_charge().value * 5.0) as usize];
 	let charge_status = if battery.time_to_empty().is_none() { " " } else { "" };
-	format!("{}{}", charge_status, state)
+	format!("{}{} ", charge_status, state)
 }
 
 
