@@ -64,7 +64,7 @@ async fn main() {
         .call();
 
     let weather_str : String = if let Ok(ref forecast) = weather_result {
-    	println!("code : {}", forecast.current.condition.code);
+    	//println!("code : {}", forecast.current.condition.code);
     	weather_code_to_icon(forecast.current.condition.code)
     } else {
     	" ".into()
