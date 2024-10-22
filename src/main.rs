@@ -59,12 +59,12 @@ async fn main() {
 	let weather_result = weather_client.forecast()
 	    .query(Query::City("Toulouse".to_string()))
         .days(2)
-        .dt(Utc.ymd(2022, 08, 21).and_hms(0, 0, 0))
+        .dt(Utc.with_ymd_and_hms(2022, 08, 21, 0, 0, 0).unwrap())
         .lang(Language::French)
         .call();
 
     let weather_str : String = if let Ok(ref forecast) = weather_result {
-    	//println!("code : {}", forecast.current.condition.code);
+    	println!("code : {}", forecast.current.condition.code);
     	weather_code_to_icon(forecast.current.condition.code)
     } else {
     	" ".into()
