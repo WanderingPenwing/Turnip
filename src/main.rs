@@ -1,40 +1,20 @@
 use std::process::Command;
 use tokio::time::{sleep, Duration};
 use chrono::Local;
-use sysinfo::System;
 use chrono::Timelike;
 use sysinfo::Cpu;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::Path;
-use sysinfo::Networks;
+use sysinfo::{Networks, Disks, System};
 use std::sync::Arc;
 use battery::Manager;
 use tokio::sync::{Notify};
-use weer_api::{*, chrono::{Utc, TimeZone}};
-use std::collections::HashMap;
+//use weer_api::{*, chrono::{Utc, TimeZone}};
+//use std::collections::HashMap;
 
-const BATTERY_STATE : [&str; 5] = ["", "", "", "", ""];
+const BATTERY_STATE : [&str; 6] = ["", "", "", "", "", ""];
 const CPU_STATE : [&str; 5] = ["", "", "", "", ""];
-const WEATHER_STATE : [&str; 10] = [" ", " ", "", "", "", "", "", "", " ", ""];
-								//   0    1    2    3    4    5    6    7    8    9  
-
-fn weather_code_to_icon(weather_code: u32) -> String {
-	let weather_states = vec![
-        (1000, 0), (1003, 3), (1006, 3), (1009, 1), (1030, 4), (1063, 2), (1066, 2), (1069, 2),
-        (1072, 2), (1087, 7), (1114, 8), (1117, 8), (1135, 4), (1147, 4), (1150, 2), (1153, 2),
-        (1168, 5), (1171, 5), (1180, 2), (1183, 2), (1186, 5), (1189, 5), (1192, 6), (1195, 6),
-        (1198, 5), (1201, 6), (1204, 1), (1207, 6), (1210, 8), (1213, 8), (1216, 8), (1219, 8),
-        (1222, 8), (1225, 8), (1237, 8), (1240, 2), (1243, 5), (1246, 6), (1249, 2), (1252, 6),
-        (1255, 8), (1258, 8), (1261, 8), (1264, 8), (1273, 7), (1276, 7), (1279, 7), (1282, 7)
-    ];
-
-    let weather_map: HashMap<u32, usize> = weather_states.into_iter().collect();
-    
-	let state = weather_map.get(&weather_code).unwrap_or(&(9 as usize));
-
-	return WEATHER_STATE[*state].to_string()
-}
 
 #[derive(PartialEq)]
 enum Connection {
@@ -47,28 +27,13 @@ enum Connection {
 async fn main() {
 	let manager = Manager::new().expect("could not create battery manager");
 	let mut sys = System::new();
+	let mut disks = Disks::new_with_refreshed_list();
 	
 	let mut networks = Networks::new();
 	let mut battery = manager.batteries().expect("could not fetch battery").next().expect("there should be a battery").expect("the battery should be okay");
 	
 	let mut networks_2 = Networks::new();
     let mut battery_2 = manager.batteries().expect("could not fetch battery").next().expect("there should be a battery").expect("the battery should be okay");
-
-	let weather_client = Client::new("2e6ff5190261446bbba80937241810", true);
-
-	let weather_result = weather_client.forecast()
-	    .query(Query::City("Toulouse".to_string()))
-        .days(2)
-        .dt(Utc.with_ymd_and_hms(2022, 08, 21, 0, 0, 0).unwrap())
-        .lang(Language::French)
-        .call();
-
-    let weather_str : String = if let Ok(ref forecast) = weather_result {
-    	//println!("code : {}", forecast.current.condition.code);
-    	weather_code_to_icon(forecast.current.condition.code)
-    } else {
-    	" ".into()
-    };
 
 	let notify = Arc::new(Notify::new());
 	let notify_cloned: Arc<Notify> = Arc::clone(&notify);
@@ -108,11 +73,14 @@ async fn main() {
 		
 		sys.refresh_memory();
 		let mem_str = mem_display(sys.used_memory());
+
+		disks.refresh();
+		let disk_str = disk_display(disks.list_mut());
 		
 		networks.refresh_list();
 		let internet_str = internet_display(&networks);
 		
-		display(format!("| {} | {} | {} | {} | {} | {} ", weather_str, internet_str, mem_str, cpu_str, battery_str, time_str));
+		display(format!("| {} | {} | {} | {} | {} | {} ", disk_str, internet_str, mem_str, cpu_str, battery_str, time_str));
 
 		let sleep_or_notify = sleep(Duration::from_secs((60 - Local::now().second()).into()));
 		tokio::select! {
@@ -137,6 +105,20 @@ fn display(status: String) {
 	}
 }
 
+fn disk_display(disks: &[sysinfo::Disk]) -> String {
+	let mut total_space = 0;
+    let mut available_space = 0;
+	for disk in disks {
+		if disk.mount_point() != Path::new("/") {
+			continue;
+		}
+        total_space += disk.total_space();
+        available_space += disk.available_space();
+    }
+    let available_gb = (available_space as f64 / (1024.0 * 1024.0 * 1024.0)).round() as u64;
+    let total_gb = (total_space as f64 / (1024.0 * 1024.0 * 1024.0)).round() as u64;
+    format!(" {}/{}  ", total_gb-available_gb, total_gb)
+}
 
 fn time_display() -> String {
 	let now = Local::now();
