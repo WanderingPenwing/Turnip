@@ -38,6 +38,15 @@ async fn main() {
 	let notify = Arc::new(Notify::new());
 	let notify_cloned: Arc<Notify> = Arc::clone(&notify);
 
+	let weather_output = Command::new("curl")
+	        .arg(r"wttr.in?format=%c%t")
+	        .output()
+	        .expect("Failed to execute weather command");
+	
+    let weather_binding = String::from_utf8_lossy(&weather_output.stdout);
+
+    let weather = weather_binding.trim();
+	
 	tokio::spawn(async move {	
 		loop {
 			let battery_charging = battery_2.time_to_empty().is_none();
@@ -80,7 +89,7 @@ async fn main() {
 		networks.refresh_list();
 		let internet_str = internet_display(&networks);
 		
-		display(format!("| {} | {} | {} | {} | {} | {} ", disk_str, internet_str, mem_str, cpu_str, battery_str, time_str));
+		display(format!("{} | {} | {} | {} | {} | {} | {} ", weather, disk_str, internet_str, mem_str, cpu_str, battery_str, time_str));
 
 		let sleep_or_notify = sleep(Duration::from_secs((60 - Local::now().second()).into()));
 		tokio::select! {
@@ -89,6 +98,7 @@ async fn main() {
 		}
 	}
 }
+
 
 fn display(status: String) {
 	let output = Command::new("xsetroot")
