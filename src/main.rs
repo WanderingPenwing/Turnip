@@ -45,8 +45,11 @@ async fn main() {
 	
     let weather_binding = String::from_utf8_lossy(&weather_output.stdout);
 
-    let weather = weather_binding.trim();
-	
+    let weather = if weather_binding.contains("Unknown") {
+		" "
+    } else {
+    	weather_binding.trim()
+	};
 	tokio::spawn(async move {	
 		loop {
 			let battery_charging = battery_2.time_to_empty().is_none();
