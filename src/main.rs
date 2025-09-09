@@ -28,32 +28,33 @@ async fn main() {
 	let manager = Manager::new().expect("could not create battery manager");
 	let mut sys = System::new();
 	let mut disks = Disks::new_with_refreshed_list();
-	
+
 	let mut networks = Networks::new();
-	let mut battery = manager.batteries().expect("could not fetch battery").next().expect("there should be a battery").expect("the battery should be okay");
+	let mut opt_battery = match manager.batteries().expect("could not fetch battery").next() {
+        Some(bat) => Some(bat.expect("the battery should be okay")),
+        None => None,
+    };
 	
 	let mut networks_2 = Networks::new();
-    let mut battery_2 = manager.batteries().expect("could not fetch battery").next().expect("there should be a battery").expect("the battery should be okay");
+	let mut opt_battery_2 = match manager.batteries().expect("could not fetch battery").next() {
+        Some(bat) => Some(bat.expect("the battery should be okay")),
+        None => None,
+    };
 
 	let notify = Arc::new(Notify::new());
 	let notify_cloned: Arc<Notify> = Arc::clone(&notify);
 
-	let weather_output = Command::new("curl")
-	        .arg(r"wttr.in?format=%c%t")
-	        .output()
-	        .expect("Failed to execute weather command");
-	
-    let weather_binding = String::from_utf8_lossy(&weather_output.stdout);
-
-    let weather = if weather_binding.contains("Unknown") {
-		" "
-    } else {
-    	weather_binding.trim()
-	};
 	tokio::spawn(async move {	
 		loop {
-			let battery_charging = battery_2.time_to_empty().is_none();
 			let connection_type = get_connection(&networks_2);
+			networks_2.refresh_list();
+			if connection_type != get_connection(&networks_2) {
+				notify_cloned.notify_one();
+			}
+            let Some(ref mut battery_2) = opt_battery_2 else {
+                continue
+            };
+			let battery_charging = battery_2.time_to_empty().is_none();
 		
 			if battery_2.state_of_charge().value == 1.0 && connection_type != Connection::None {
 				sleep(Duration::from_secs(20)).await;
@@ -67,18 +68,16 @@ async fn main() {
 				continue
 			}
 
-			networks_2.refresh_list();
-			if connection_type != get_connection(&networks_2) {
-				notify_cloned.notify_one();
-			}
 		}
 	});
 
 	loop {
 		let time_str = time_display();
 		
-		battery.refresh().expect("could not refresh battery");
-		let battery_str = battery_display(&battery);
+        if let Some(ref mut battery) = opt_battery {
+            battery.refresh().expect("could not refresh battery");
+        }
+		let battery_str = battery_display(&opt_battery);
 		
 		sys.refresh_cpu();
 		let cpu_str = cpu_display(sys.cpus());
@@ -92,7 +91,7 @@ async fn main() {
 		networks.refresh_list();
 		let internet_str = internet_display(&networks);
 		
-		display(format!("{} | {} | {} | {} | {} | {} | {} ", weather, disk_str, internet_str, mem_str, cpu_str, battery_str, time_str));
+		display(format!("| {} | {} | {} | {} | {} | {} ", disk_str, mem_str, cpu_str, internet_str, battery_str, time_str));
 
 		let sleep_or_notify = sleep(Duration::from_secs((60 - Local::now().second()).into()));
 		tokio::select! {
@@ -130,7 +129,7 @@ fn disk_display(disks: &[sysinfo::Disk]) -> String {
     }
     let available_gb = (available_space as f64 / (1024.0 * 1024.0 * 1024.0)).round() as u64;
     let total_gb = (total_space as f64 / (1024.0 * 1024.0 * 1024.0)).round() as u64;
-    format!(" {}/{}  ", total_gb-available_gb, total_gb)
+    format!("{}/{} ", total_gb-available_gb, total_gb)
 }
 
 fn time_display() -> String {
@@ -139,7 +138,10 @@ fn time_display() -> String {
 }
 
 
-fn battery_display(battery: &battery::Battery) -> String {
+fn battery_display(opt_battery: &Option<battery::Battery>) -> String {
+    let Some(battery) = opt_battery else {
+		return "".to_string()
+    };
 	if battery.state_of_charge().value == 1.0 {
 		return "".to_string()
 	}
