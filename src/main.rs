@@ -145,10 +145,14 @@ fn battery_display(opt_battery: &Option<battery::Battery>) -> String {
 	if battery.state_of_charge().value == 1.0 {
 		return "\x05 \x01".to_string()
 	}
+
+    if battery.state_of_charge().value < 0.15 && battery.time_to_empty().is_none() {
+        alert("low battery, please recharge");
+    }
 	
 	let state = BATTERY_STATE[(battery.state_of_charge().value * 5.0) as usize];
-	let charge_status = if battery.time_to_empty().is_none() { "\x05\x01 " } else { "" };
-	format!("{}{}", charge_status, state)
+	let charge_status = if battery.time_to_empty().is_none() { "\x05 \x01" } else { "" };
+	format!("{}{} ", charge_status, state)
 }
 
 
@@ -169,6 +173,9 @@ fn cpu_display(cpus: &[Cpu]) -> String {
 		t if t < 75.0 => CPU_STATE[3], 
 		_ => CPU_STATE[4],
 	};
+    if cpu_temp > 75.0 {
+        alert("high cpu temperature !");
+    }
 	
 	return format!("{} {}", cpu_usage, cpu_state);
 }
@@ -236,4 +243,18 @@ fn get_connection(networks: &Networks) -> Connection {
 	}
 	
 	return Connection::Wired
+}
+
+fn alert(msg: &str) {
+	let output = Command::new("notify-send")
+		.arg("-u")
+        .arg("critical")
+        .arg("-a")
+        .arg("Turnip")
+		.arg(msg)
+		.output();
+    let Err(reason) = output else {
+        return
+    };
+   eprintln!("could not send notification alert : {}", reason); 
 }
