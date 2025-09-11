@@ -13,8 +13,8 @@ use tokio::sync::{Notify};
 //use weer_api::{*, chrono::{Utc, TimeZone}};
 //use std::collections::HashMap;
 
-const BATTERY_STATE : [&str; 6] = ["", "", "", "", "", ""];
-const CPU_STATE : [&str; 5] = ["", "", "", "", ""];
+const BATTERY_STATE : [&str; 6] = ["\x03 \x01", "\x05 \x01", " ", " ", " ", " "];
+const CPU_STATE : [&str; 5] = [" ", "\x06 \x01", "\x05 \x01", "\x03 \x01", "\x07 \x01"];
 
 #[derive(PartialEq)]
 enum Connection {
@@ -91,7 +91,7 @@ async fn main() {
 		networks.refresh_list();
 		let internet_str = internet_display(&networks);
 		
-		display(format!("| {} | {} | {} | {} | {} | {} ", disk_str, mem_str, cpu_str, internet_str, battery_str, time_str));
+		display(format!("| {}| {}| {}| {}| {}| {} ", disk_str, mem_str, cpu_str, internet_str, battery_str, time_str));
 
 		let sleep_or_notify = sleep(Duration::from_secs((60 - Local::now().second()).into()));
 		tokio::select! {
@@ -129,7 +129,7 @@ fn disk_display(disks: &[sysinfo::Disk]) -> String {
     }
     let available_gb = (available_space as f64 / (1024.0 * 1024.0 * 1024.0)).round() as u64;
     let total_gb = (total_space as f64 / (1024.0 * 1024.0 * 1024.0)).round() as u64;
-    format!("{}/{} ", total_gb-available_gb, total_gb)
+    format!("{}/{} \x04 \x01", total_gb-available_gb, total_gb)
 }
 
 fn time_display() -> String {
@@ -140,15 +140,15 @@ fn time_display() -> String {
 
 fn battery_display(opt_battery: &Option<battery::Battery>) -> String {
     let Some(battery) = opt_battery else {
-		return "".to_string()
+		return "\x05 \x01".to_string()
     };
 	if battery.state_of_charge().value == 1.0 {
-		return "".to_string()
+		return "\x05 \x01".to_string()
 	}
 	
 	let state = BATTERY_STATE[(battery.state_of_charge().value * 5.0) as usize];
-	let charge_status = if battery.time_to_empty().is_none() { " " } else { "" };
-	format!("{}{} ", charge_status, state)
+	let charge_status = if battery.time_to_empty().is_none() { "\x05\x01 " } else { "" };
+	format!("{}{}", charge_status, state)
 }
 
 
@@ -177,7 +177,7 @@ fn cpu_display(cpus: &[Cpu]) -> String {
 fn mem_display(mem_usage: u64) -> String {
 	let used_memory_gb = mem_usage as f64 / 1024.0 / 1024.0 / 1024.0;
 	
-	return format!("{:.1} ", used_memory_gb);
+	return format!("{:.1} \x04 \x01", used_memory_gb);
 }
 
 // Get Wi-Fi signal strength
@@ -215,11 +215,11 @@ fn internet_display(networks: &Networks) -> String {
 	let connection_type = get_connection(networks);
 	
 	match connection_type {
-		Connection::Wired => " ".to_string(),
-		Connection::None =>  " ".to_string(),
+		Connection::Wired => "\x04 \x01".to_string(),
+		Connection::None =>  "\x03 \x01".to_string(),
 		Connection::Wifi => {
 			let strength = get_wifi_strength().unwrap_or(0.0);
-			format!("  {:.0}%", strength)
+			format!("\x04  \x01{:.0}% ", strength)
 		}
 	}
 }
