@@ -7,11 +7,8 @@ use std::fs;
 use std::io::{self, BufRead};
 use std::path::Path;
 use sysinfo::{Networks, Disks, System};
-use std::sync::Arc;
 use battery::Manager;
-use tokio::sync::{Notify};
-//use weer_api::{*, chrono::{Utc, TimeZone}};
-//use std::collections::HashMap;
+use std::cmp::min;
 
 const BATTERY_STATE : [&str; 6] = ["\x03 \x01", "\x05 \x01", " ", " ", " ", " "];
 const CPU_STATE : [&str; 5] = [" ", "\x06 \x01", "\x05 \x01", "\x03 \x01", "\x07 \x01"];
@@ -32,45 +29,9 @@ async fn main() {
 	let mut networks = Networks::new();
 	let mut opt_battery = match manager.batteries().expect("could not fetch battery").next() {
         Some(bat) => Some(bat.expect("the battery should be okay")),
-        None => None,
+        _ => None,
     };
 	
-	let mut networks_2 = Networks::new();
-	let mut opt_battery_2 = match manager.batteries().expect("could not fetch battery").next() {
-        Some(bat) => Some(bat.expect("the battery should be okay")),
-        None => None,
-    };
-
-	let notify = Arc::new(Notify::new());
-	let notify_cloned: Arc<Notify> = Arc::clone(&notify);
-
-	tokio::spawn(async move {	
-		loop {
-			let connection_type = get_connection(&networks_2);
-			networks_2.refresh_list();
-			if connection_type != get_connection(&networks_2) {
-				notify_cloned.notify_one();
-			}
-            let Some(ref mut battery_2) = opt_battery_2 else {
-                continue
-            };
-			let battery_charging = battery_2.time_to_empty().is_none();
-		
-			if battery_2.state_of_charge().value == 1.0 && connection_type != Connection::None {
-				sleep(Duration::from_secs(20)).await;
-			} else {
-				sleep(Duration::from_secs(2)).await;
-			}
-			
-			battery_2.refresh().expect("could not refresh battery");
-			if battery_2.time_to_empty().is_none() != battery_charging && battery_2.state_of_charge().value != 1.0 {
-				notify_cloned.notify_one();
-				continue
-			}
-
-		}
-	});
-
 	loop {
 		let time_str = time_display();
 		
@@ -93,11 +54,8 @@ async fn main() {
 		
 		display(format!("| {}| {}| {}| {}| {}| {} ", disk_str, mem_str, cpu_str, internet_str, battery_str, time_str));
 
-		let sleep_or_notify = sleep(Duration::from_secs((60 - Local::now().second()).into()));
-		tokio::select! {
-			_ = sleep_or_notify => {}
-			_ = notify.notified() => {}
-		}
+		sleep(Duration::from_secs(min(60 - Local::now().second(), 20).into()).into()).await;
+        println!("loop");
 	}
 }
 
